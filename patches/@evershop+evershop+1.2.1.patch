@@ -1,3 +1,148 @@
+diff --git a/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js b/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js
+index 0406940..4850d4b 100644
+--- a/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js
++++ b/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js
+@@ -34,6 +34,7 @@ const {
+ const {
+   getCookieSecret
+ } = require('@evershop/evershop/src/modules/auth/services/getCookieSecret');
++const rateLimiterMiddleware = require('./rateLimiter');
+ 
+ module.exports = exports = {};
+ 
+@@ -41,6 +42,12 @@ exports.addDefaultMiddlewareFuncs = function addDefaultMiddlewareFuncs(
+   app,
+   routes
+ ) {
++  // Add rate limiter middleware as a regular middleware function
++  app.use((request, response, next) => {
++    const delegate = { continue: false };
++    rateLimiterMiddleware(request, response, delegate, next);
++  });
++
+   app.use((request, response, next) => {
+     response.debugMiddlewares = [];
+     next();
+@@ -74,8 +81,8 @@ exports.addDefaultMiddlewareFuncs = function addDefaultMiddlewareFuncs(
+       process.env.NODE_ENV === 'test'
+         ? undefined
+         : new (sessionStorage(session))({
+-            pool
+-          }),
++          pool
++        }),
+     secret: cookieSecret,
+     cookie: {
+       maxAge: getConfig('system.session.maxAge', 24 * 60 * 60 * 1000)
+@@ -257,7 +264,7 @@ exports.addDefaultMiddlewareFuncs = function addDefaultMiddlewareFuncs(
+               stats: 'none'
+             }
+           );
+-          middlewareFunc.context.logger.info = () => {};
++          middlewareFunc.context.logger.info = () => { };
+         } else {
+           middlewareFunc = route.webpackMiddleware;
+         }
+@@ -279,7 +286,7 @@ exports.addDefaultMiddlewareFuncs = function addDefaultMiddlewareFuncs(
+               stats: 'none'
+             }
+           );
+-          notFoundMiddlewareFunc.context.logger.info = () => {};
++          notFoundMiddlewareFunc.context.logger.info = () => { };
+         } else {
+           notFoundMiddlewareFunc = notFoundRoute.webpackMiddleware;
+         }
+@@ -295,7 +302,7 @@ exports.addDefaultMiddlewareFuncs = function addDefaultMiddlewareFuncs(
+               publicPath: '/',
+               stats: 'none'
+             });
+-          adminNotFoundMiddlewareFunc.context.logger.info = () => {};
++          adminNotFoundMiddlewareFunc.context.logger.info = () => { };
+         } else {
+           adminNotFoundMiddlewareFunc = adminNotFoundRoute.webpackMiddleware;
+         }
+@@ -314,8 +321,8 @@ exports.addDefaultMiddlewareFuncs = function addDefaultMiddlewareFuncs(
+         const hotMiddleware = route.hotMiddleware
+           ? route.hotMiddleware
+           : require('webpack-hot-middleware')(webpackCompiler, {
+-              path: `/eHot/${route.id}`
+-            });
++            path: `/eHot/${route.id}`
++          });
+         if (!route.hotMiddleware) {
+           route.hotMiddleware = hotMiddleware;
+         }
+diff --git a/node_modules/@evershop/evershop/bin/lib/rateLimiter.js b/node_modules/@evershop/evershop/bin/lib/rateLimiter.js
+new file mode 100644
+index 0000000..5c9ac5c
+--- /dev/null
++++ b/node_modules/@evershop/evershop/bin/lib/rateLimiter.js
+@@ -0,0 +1,64 @@
++// modules/core/middleware/rateLimit.js
++const rateLimit = require('express-rate-limit');
++
++// Create API rate limiter
++const apiLimiter = rateLimit({
++    windowMs: 15 * 60 * 1000, // 15 minutes
++    max: 100, // Limit each IP to 100 requests per windowMs
++    message: 'Too many API requests from this IP, please try again later'
++});
++
++// Create login rate limiter
++const loginLimiter = rateLimit({
++    windowMs: 60 * 60 * 1000, // 1 hour
++    max: 5, // Limit each IP to 5 login attempts per hour
++    message: 'Too many login attempts from this IP, please try again after an hour'
++});
++
++// Create registration rate limiter
++const registerLimiter = rateLimit({
++    windowMs: 24 * 60 * 60 * 1000, // 24 hours
++    max: 3, // Limit each IP to 3 registration attempts per day
++    message: 'Too many registration attempts from this IP, please try again tomorrow'
++});
++
++// Fixed rate limiter middleware
++const rateLimiterMiddleware = async (request, response, delegate, next) => {
++    try {
++        // Apply API rate limiter to all API routes
++        if (request.originalUrl.startsWith('/api/')) {
++            return apiLimiter(request, response, () => {
++                delegate.continue = true;
++                next();
++            });
++        }
++
++        // Apply login rate limiter to login route
++        if (request.originalUrl === '/customer/login' && request.method === 'POST') {
++            return loginLimiter(request, response, () => {
++                delegate.continue = true;
++                next();
++            });
++        }
++
++        // Apply registration rate limiter to registration route
++        if (request.originalUrl === '/customer/register' && request.method === 'POST') {
++            return registerLimiter(request, response, () => {
++                delegate.continue = true;
++                next();
++            });
++        }
++
++        // No rate limiting applied
++        delegate.continue = true;
++        next();
++    } catch (error) {
++        console.error('Rate limiter error:', error);
++        response.status(500).json({
++            error: 'Rate limiter error',
++            message: error.message
++        });
++    }
++};
++
++module.exports = rateLimiterMiddleware;
+\ No newline at end of file
 diff --git a/node_modules/@evershop/evershop/bin/lib/startUp.js b/node_modules/@evershop/evershop/bin/lib/startUp.js
 index 701bc46..69a1e9d 100644
 --- a/node_modules/@evershop/evershop/bin/lib/startUp.js
