@@ -21,3 +21,63 @@ index 701bc46..69a1e9d 100644
  
  module.exports.start = async function start(cb) {
    const modules = [...getCoreModules(), ...getEnabledExtensions()];
+diff --git a/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js b/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js
+index 50d965d..c6d8c13 100644
+--- a/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js
++++ b/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js
+@@ -21,6 +21,7 @@ const {
+ const { emit } = require('@evershop/evershop/src/lib/event/emitter');
+ const { getAjv } = require('../../../base/services/getAjv');
+ const customerDataSchema = require('./customerDataSchema.json');
++const { CustomerSanitizer } = require('../../services/customerSanitizer');
+ 
+ function validateCustomerDataBeforeInsert(data) {
+   const ajv = getAjv();
+@@ -42,7 +43,8 @@ function validateCustomerDataBeforeInsert(data) {
+ }
+ 
+ async function insertCustomerData(data, connection) {
+-  const customer = await insert('customer').given(data).execute(connection);
++  const sanitizedData = CustomerSanitizer.sanitizeCustomerData(data);
++  const customer = await insert('customer').given(sanitizedData).execute(connection);
+   // Delete password from customer object
+   delete customer.password;
+   return customer;
+diff --git a/node_modules/@evershop/evershop/src/modules/customer/services/customerSanitizer.js b/node_modules/@evershop/evershop/src/modules/customer/services/customerSanitizer.js
+new file mode 100644
+index 0000000..da06e5f
+--- /dev/null
++++ b/node_modules/@evershop/evershop/src/modules/customer/services/customerSanitizer.js
+@@ -0,0 +1,31 @@
++const xss = require('xss');
++const validator = require('validator');
++
++module.exports.CustomerSanitizer = class CustomerSanitizer {
++    static sanitizeFullName(fullName) {
++        if (!fullName) return '';
++
++        // Convert to string and trim whitespace
++        let sanitized = String(fullName).trim();
++
++        // Remove any HTML/script tags
++        sanitized = xss(sanitized, {
++            whiteList: {}, // No tags allowed
++            stripIgnoreTag: true
++        });
++
++        // Remove special characters but keep spaces and basic punctuation
++        sanitized = sanitized.replace(/[^\w\s\-'.]/, '');
++
++        // Escape any remaining special characters
++        return validator.escape(sanitized);
++    }
++
++    static sanitizeCustomerData(data) {
++        return {
++            full_name: this.sanitizeFullName(data.full_name),
++            email: data.email?.toLowerCase().trim(),
++            password: data.password // Password will be hashed, no sanitization needed
++        };
++    }
++}
+\ No newline at end of file
