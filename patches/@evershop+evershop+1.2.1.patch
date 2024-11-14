@@ -1,5 +1,18 @@
+diff --git a/node_modules/@evershop/evershop/bin/install/index.js b/node_modules/@evershop/evershop/bin/install/index.js
+index ad16c96..b4147be 100644
+--- a/node_modules/@evershop/evershop/bin/install/index.js
++++ b/node_modules/@evershop/evershop/bin/install/index.js
+@@ -229,7 +229,7 @@ DB_SSLMODE="${sslMode}"
+   await startTransaction(connection);
+   try {
+     // Create the admin user
+-    const passwordHash = hashPassword(adminUser.password || '123456');
++    const passwordHash = await hashPassword(adminUser.password || '123456');
+     await execute(
+       connection,
+       `CREATE TABLE IF NOT EXISTS "admin_user" (
 diff --git a/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js b/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js
-index 0406940..4850d4b 100644
+index 0406940..2d1f6c1 100644
 --- a/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js
 +++ b/node_modules/@evershop/evershop/bin/lib/addDefaultMiddlewareFuncs.js
 @@ -34,6 +34,7 @@ const {
@@ -144,7 +157,7 @@ index 0000000..5c9ac5c
 +module.exports = rateLimiterMiddleware;
 \ No newline at end of file
 diff --git a/node_modules/@evershop/evershop/bin/lib/startUp.js b/node_modules/@evershop/evershop/bin/lib/startUp.js
-index 701bc46..69a1e9d 100644
+index 701bc46..07c3718 100644
 --- a/node_modules/@evershop/evershop/bin/lib/startUp.js
 +++ b/node_modules/@evershop/evershop/bin/lib/startUp.js
 @@ -1,4 +1,5 @@
@@ -166,8 +179,207 @@ index 701bc46..69a1e9d 100644
  
  module.exports.start = async function start(cb) {
    const modules = [...getCoreModules(), ...getEnabledExtensions()];
+diff --git a/node_modules/@evershop/evershop/bin/user/changePassword.js b/node_modules/@evershop/evershop/bin/user/changePassword.js
+index 675400e..5651b87 100644
+--- a/node_modules/@evershop/evershop/bin/user/changePassword.js
++++ b/node_modules/@evershop/evershop/bin/user/changePassword.js
+@@ -54,7 +54,7 @@ async function updatePassword() {
+     }
+     await update('admin_user')
+       .given({
+-        password: hashPassword(password)
++        password: await hashPassword(password)
+       })
+       .where('admin_user_id', '=', user.admin_user_id)
+       .execute(pool);
+diff --git a/node_modules/@evershop/evershop/bin/user/create.js b/node_modules/@evershop/evershop/bin/user/create.js
+index 0333128..e0c9bf6 100644
+--- a/node_modules/@evershop/evershop/bin/user/create.js
++++ b/node_modules/@evershop/evershop/bin/user/create.js
+@@ -64,7 +64,7 @@ async function createAdminUser() {
+       .given({
+         full_name,
+         email,
+-        password: hashPassword(password)
++        password: await hashPassword(password)
+       })
+       .execute(pool);
+     success('Admin user created successfully');
+diff --git a/node_modules/@evershop/evershop/src/lib/util/passwordHelper.js b/node_modules/@evershop/evershop/src/lib/util/passwordHelper.js
+index 79846b9..75039c0 100644
+--- a/node_modules/@evershop/evershop/src/lib/util/passwordHelper.js
++++ b/node_modules/@evershop/evershop/src/lib/util/passwordHelper.js
+@@ -1,59 +1,80 @@
+-const bcrypt = require('bcryptjs');
+ const { getValueSync } = require('./registry');
++const argon2 = require('argon2');
+ 
+-module.exports.hashPassword = function hashPassword(password) {
+-  const salt = bcrypt.genSaltSync(10);
+-  const hash = bcrypt.hashSync(password, salt);
+-  return hash;
++// Argon2 configuration object for consistent settings
++const argon2Config = {
++    type: argon2.argon2id,
++    memoryCost: 65536,    // 64MB
++    timeCost: 3,          // 3 iterations
++    parallelism: 4,
++    saltLength: 16
+ };
+ 
+-module.exports.comparePassword = function comparePassword(password, hash) {
+-  return bcrypt.compareSync(password, hash);
++module.exports.hashPassword = async function hashPassword(password) {
++    try {
++        if (!password) {
++            throw new Error('Password is required');
++        }
++        return await argon2.hash(password, argon2Config);
++    } catch (error) {
++        throw new Error(`Failed to hash password: ${error.message}`);
++    }
+ };
+ 
+-module.exports.verifyPassword = function verifyPassword(password) {
+-  const rules = getValueSync(
+-    'passwordVerifyRules',
+-    [
+-      {
+-        callback: (password) => password.length >= 6,
+-        message: 'Password must be at least 6 characters'
+-      }
+-    ],
+-    {},
+-    (rules) => {
+-      // rules must be an array
+-      if (!Array.isArray(rules)) {
+-        return false;
+-      }
+-      try {
+-        // Each rule must be an object with callback and message
+-        rules.forEach((rule) => {
+-          if (typeof rule !== 'object') {
+-            throw new Error('Rule must be an object');
+-          }
+-          if (typeof rule.callback !== 'function') {
+-            throw new Error('Rule callback must be a function');
+-          }
+-          if (typeof rule.message !== 'string') {
+-            throw new Error('Rule message must be a string');
+-          }
+-        });
+-        return true;
+-      } catch (e) {
+-        return false;
+-      }
++module.exports.comparePassword = async function comparePassword(password, hash) {
++    try {
++        if (!password || !hash) {
++            throw new Error('Password and hash are required');
++        }
++        return await argon2.verify(hash, password);
++    } catch (error) {
++        throw new Error(`Failed to compare password: ${error.message}`);
+     }
+-  );
++};
+ 
+-  const errors = [];
+-  rules.forEach((rule) => {
+-    if (!rule.callback(password)) {
+-      errors.push(rule.message);
+-    }
+-  });
++module.exports.verifyPassword = function verifyPassword(password) {
++    const rules = getValueSync(
++        'passwordVerifyRules',
++        [
++            {
++                callback: (password) => password.length >= 6,
++                message: 'Password must be at least 6 characters'
++            }
++        ],
++        {},
++        (rules) => {
++            // rules must be an array
++            if (!Array.isArray(rules)) {
++                return false;
++            }
++            try {
++                // Each rule must be an object with callback and message
++                rules.forEach((rule) => {
++                    if (typeof rule !== 'object') {
++                        throw new Error('Rule must be an object');
++                    }
++                    if (typeof rule.callback !== 'function') {
++                        throw new Error('Rule callback must be a function');
++                    }
++                    if (typeof rule.message !== 'string') {
++                        throw new Error('Rule message must be a string');
++                    }
++                });
++                return true;
++            } catch (e) {
++                return false;
++            }
++        }
++    );
++
++    const errors = [];
++    rules.forEach((rule) => {
++        if (!rule.callback(password)) {
++            errors.push(rule.message);
++        }
++    });
+ 
+-  if (errors.length) {
+-    throw new Error(`Password is invalid: ${errors.join(', ')}`);
+-  }
++    if (errors.length) {
++        throw new Error(`Password is invalid: ${errors.join(', ')}`);
++    }
+ };
+diff --git a/node_modules/@evershop/evershop/src/modules/auth/bootstrap.js b/node_modules/@evershop/evershop/src/modules/auth/bootstrap.js
+index 08462aa..a906574 100644
+--- a/node_modules/@evershop/evershop/src/modules/auth/bootstrap.js
++++ b/node_modules/@evershop/evershop/src/modules/auth/bootstrap.js
+@@ -16,7 +16,7 @@ module.exports = () => {
+       .where('email', 'ILIKE', userEmail)
+       .and('status', '=', 1)
+       .load(pool);
+-    const result = comparePassword(password, user ? user.password : '');
++    const result = await comparePassword(password, user ? user.password : '');
+     if (!user || !result) {
+       throw new Error('Invalid email or password');
+     }
+diff --git a/node_modules/@evershop/evershop/src/modules/customer/api/updateCustomer/updateCustomer.js b/node_modules/@evershop/evershop/src/modules/customer/api/updateCustomer/updateCustomer.js
+index bc24b6f..86b8881 100644
+--- a/node_modules/@evershop/evershop/src/modules/customer/api/updateCustomer/updateCustomer.js
++++ b/node_modules/@evershop/evershop/src/modules/customer/api/updateCustomer/updateCustomer.js
+@@ -35,7 +35,7 @@ module.exports = async (request, response, delegate, next) => {
+     // Check if password is set
+     if (request.body.password) {
+       // Hash the password
+-      request.body.password = hashPassword(request.body.password);
++      request.body.password = await hashPassword(request.body.password);
+     }
+ 
+     await update('customer')
+diff --git a/node_modules/@evershop/evershop/src/modules/customer/bootstrap.js b/node_modules/@evershop/evershop/src/modules/customer/bootstrap.js
+index 3b0a32f..6b42908 100644
+--- a/node_modules/@evershop/evershop/src/modules/customer/bootstrap.js
++++ b/node_modules/@evershop/evershop/src/modules/customer/bootstrap.js
+@@ -84,7 +84,7 @@ module.exports = () => {
+       .and('status', '=', 1)
+       .load(pool);
+ 
+-    const result = comparePassword(password, customer ? customer.password : '');
++    const result = await comparePassword(password, customer ? customer.password : '');
+     if (!customer || !result) {
+       throw new Error(translate('Invalid email or password'));
+     }
 diff --git a/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js b/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js
-index 50d965d..c6d8c13 100644
+index 50d965d..a7468f4 100644
 --- a/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js
 +++ b/node_modules/@evershop/evershop/src/modules/customer/services/customer/createCustomer.js
 @@ -21,6 +21,7 @@ const {
@@ -188,6 +400,28 @@ index 50d965d..c6d8c13 100644
    // Delete password from customer object
    delete customer.password;
    return customer;
+@@ -66,7 +68,7 @@ async function createCustomer(data, context) {
+     validateCustomerDataBeforeInsert(customerData);
+     const { email, password } = customerData;
+     // Hash the password
+-    const hashedPassword = hashPassword(password);
++    const hashedPassword = await hashPassword(password);
+     // Check if email is already used
+     const existingCustomer = await select()
+       .from('customer')
+diff --git a/node_modules/@evershop/evershop/src/modules/customer/services/customer/updatePassword.js b/node_modules/@evershop/evershop/src/modules/customer/services/customer/updatePassword.js
+index 0f2a144..941d850 100644
+--- a/node_modules/@evershop/evershop/src/modules/customer/services/customer/updatePassword.js
++++ b/node_modules/@evershop/evershop/src/modules/customer/services/customer/updatePassword.js
+@@ -43,7 +43,7 @@ async function updatePassword(customerId, newPassword, context) {
+     // Verify password
+     verifyPassword(newPassword);
+     // Hash password
+-    const hash = hashPassword(newPassword);
++    const hash = await hashPassword(newPassword);
+     // Update customer password
+     await hookable(updateCustomerPassword, {
+       ...context,
 diff --git a/node_modules/@evershop/evershop/src/modules/customer/services/customerSanitizer.js b/node_modules/@evershop/evershop/src/modules/customer/services/customerSanitizer.js
 new file mode 100644
 index 0000000..da06e5f
