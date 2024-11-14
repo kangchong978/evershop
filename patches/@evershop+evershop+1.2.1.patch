@@ -1,0 +1,23 @@
+diff --git a/node_modules/@evershop/evershop/bin/lib/startUp.js b/node_modules/@evershop/evershop/bin/lib/startUp.js
+index 701bc46..69a1e9d 100644
+--- a/node_modules/@evershop/evershop/bin/lib/startUp.js
++++ b/node_modules/@evershop/evershop/bin/lib/startUp.js
+@@ -1,4 +1,5 @@
+-const http = require('http');
++const https = require('https');
++const fs = require('fs');
+ const config = require('config');
+ const { Handler } = require('@evershop/evershop/src/lib/middleware/Handler');
+ const spawn = require('cross-spawn');
+@@ -21,7 +22,10 @@ const { getEnabledExtensions } = require('../extension');
+ 
+ let app = createApp();
+ /** Create a http server */
+-const server = http.createServer(app);
++const server = https.createServer({
++  key: fs.readFileSync('key.pem'),
++  cert: fs.readFileSync('cert.pem')
++}, app);
+ 
+ module.exports.start = async function start(cb) {
+   const modules = [...getCoreModules(), ...getEnabledExtensions()];

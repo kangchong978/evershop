@@ -15,6 +15,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@evershop/evershop": "^1.2.1"
+    "@evershop/evershop": "^1.2.1",
+    "fs": "^0.0.1-security",
+    "https": "^1.0.0"
   }
 }
